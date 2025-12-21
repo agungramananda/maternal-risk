@@ -2,14 +2,65 @@ import streamlit as st
 import pandas as pd
 import joblib
 import numpy as np
+from sklearn.base import BaseEstimator, ClassifierMixin
 from database import SessionLocal
 from models import Patient, MaternalRecord
 
 st.set_page_config(page_title="Klasifikasi Risiko Kesehatan Maternal", layout="wide")
 
+class Node:
+    def __init__(self, feature=None, threshold=None, left=None, right=None, value=None):
+        self.feature = feature
+        self.threshold = threshold
+        self.left = left
+        self.right = right
+        self.value = value
+
+def _predict_sample(node, x):
+    if node.value is not None:
+        return node.value
+    if x[node.feature] <= node.threshold:
+        return _predict_sample(node.left, x)
+    return _predict_sample(node.right, x)
+
+def _predict(tree, X):
+    return np.array([_predict_sample(tree, x) for x in X])
+
+class ScratchDecisionTree(BaseEstimator, ClassifierMixin):
+    def __init__(self, max_depth=None, min_samples_split=2, min_samples_leaf=1, max_features=None):
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
+        self.max_features = max_features
+        self.tree_ = None
+
+    def fit(self, X, y):
+        raise NotImplementedError("Training is done in the notebook; this stub supports unpickling and predict.")
+
+    def predict(self, X):
+        X = np.array(X)
+        return _predict(self.tree_, X)
+
 @st.cache_resource
 def load_models():
-    dt_data = joblib.load('model/maternal_health_dt_model.pkl')
+    dt_bundle_paths = [
+        "model/maternal_health_dt_model_fix.pkl",
+        "maternal_health_dt_bundle.pkl" 
+    ]
+
+    dt_data = None
+    for path in dt_bundle_paths:
+        try:
+            dt_data = joblib.load(path)
+            break
+        except FileNotFoundError:
+            continue
+
+    if dt_data is None:
+        raise FileNotFoundError(
+            "Decision Tree bundle not found. Expected one of: " + ", ".join(dt_bundle_paths)
+        )
+
     rf_data = joblib.load('model/maternal_health_rf_model.pkl')
     return dt_data, rf_data
 
@@ -181,8 +232,17 @@ if menu == "Prediksi Risiko":
     dt_data, rf_data = load_models()
     dt_model = dt_data["model"]
     rf_model = rf_data["model"]
-    label_mapping = dt_data["label_mapping"]
-    feature_names = dt_data["feature_names"]
+    label_mapping = dt_data.get("label_mapping", {})
+    feature_names = dt_data.get("feature_names") or dt_data.get("feature_order")
+    if feature_names is None:
+        feature_names = [
+            "Age",
+            "SystolicBP",
+            "DiastolicBP",
+            "BS",
+            "BodyTemp",
+            "HeartRate",
+        ]
     
     st.subheader("Data Pasien")
     
