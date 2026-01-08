@@ -17,6 +17,15 @@ class Node:
         self.value = value
 
 def _predict_sample(node, x):
+    # Handle dict-based tree structure (from DecisionTreeScratch)
+    if isinstance(node, dict):
+        if x[node["feature"]] <= node["threshold"]:
+            return _predict_sample(node["left"], x)
+        return _predict_sample(node["right"], x)
+    # Handle leaf node (integer value)
+    if not isinstance(node, Node):
+        return node
+    # Handle Node class-based tree structure
     if node.value is not None:
         return node.value
     if x[node.feature] <= node.threshold:
@@ -27,25 +36,59 @@ def _predict(tree, X):
     return np.array([_predict_sample(tree, x) for x in X])
 
 class ScratchDecisionTree(BaseEstimator, ClassifierMixin):
-    def __init__(self, max_depth=None, min_samples_split=2, min_samples_leaf=1, max_features=None):
+    def __init__(self, max_depth=None, min_samples_split=2, min_samples_leaf=1, max_features=None, n_features=None):
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
         self.max_features = max_features
+        self.n_features = n_features
         self.tree_ = None
+        self.tree = None
 
     def fit(self, X, y):
         raise NotImplementedError("Training is done in the notebook; this stub supports unpickling and predict.")
 
     def predict(self, X):
         X = np.array(X)
-        return _predict(self.tree_, X)
+        tree_data = getattr(self, 'tree_', None) or getattr(self, 'tree', None)
+        return _predict(tree_data, X)
+
+class RandomForestScratch(BaseEstimator, ClassifierMixin):
+    def __init__(self, n_estimators=100, max_depth=None, min_samples_split=2, 
+                 min_samples_leaf=1, max_features=None, bootstrap=True, random_state=None):
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.min_samples_split = min_samples_split
+        self.min_samples_leaf = min_samples_leaf
+        self.max_features = max_features
+        self.bootstrap = bootstrap
+        self.random_state = random_state
+        self.trees_ = []
+
+    def fit(self, X, y):
+        raise NotImplementedError("Training is done in the notebook; this stub supports unpickling and predict.")
+
+    def predict(self, X):
+        X = np.array(X)
+        tree_predictions = []
+        for tree in self.trees_:
+            # Directly access tree data structure for compatibility
+            tree_data = getattr(tree, 'tree', None) or getattr(tree, 'tree_', None)
+            if tree_data is not None:
+                tree_predictions.append(_predict(tree_data, X))
+            elif hasattr(tree, 'predict'):
+                tree_predictions.append(tree.predict(X))
+            else:
+                tree_predictions.append(_predict(tree, X))
+        tree_predictions = np.array(tree_predictions)
+        return np.array([np.bincount(tree_predictions[:, i]).argmax() for i in range(X.shape[0])])
+
+DecisionTreeScratch = ScratchDecisionTree
 
 @st.cache_resource
 def load_models():
     dt_bundle_paths = [
         "model/maternal_health_dt_model_fix.pkl",
-        "maternal_health_dt_bundle.pkl" 
     ]
 
     dt_data = None
@@ -61,7 +104,23 @@ def load_models():
             "Decision Tree bundle not found. Expected one of: " + ", ".join(dt_bundle_paths)
         )
 
-    rf_data = joblib.load('model/maternal_health_rf_model.pkl')
+    rf_bundle_paths = [
+        "model/maternal_health_rf_fix.pkl",
+    ]
+
+    rf_data = None
+    for path in rf_bundle_paths:
+        try:
+            rf_data = joblib.load(path)
+            break
+        except FileNotFoundError:
+            continue
+
+    if rf_data is None:
+        raise FileNotFoundError(
+            "Random Forest bundle not found. Expected one of: " + ", ".join(rf_bundle_paths)
+        )
+
     return dt_data, rf_data
 
 def create_patient(name, email, phone_number, address):
